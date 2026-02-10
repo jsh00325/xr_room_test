@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>Better XR Mockup</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; }
+        #ui-layer {
+            position: absolute;
+            top: 20px; left: 20px;
+            color: rgba(255, 255, 255, 0.9);
+            font-family: 'Pretendard', sans-serif;
+            background: rgba(0, 0, 0, 0.6);
+            padding: 15px;
+            border-radius: 12px;
+            pointer-events: none; /* 클릭 통과 */
+            user-select: none;
+        }
+        .key { color: #4facfe; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div id="ui-layer">
+        <div><span class="key">[1]</span> TV 배치 (Samsung The Serif 스타일)</div>
+        <div><span class="key">[2]</span> 에어컨 교체 (벽걸이 → 스탠드)</div>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'; // 나중에 실제 모델 로드용
+
+        // 1. 씬 & 기본 환경
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0xdddddd); // 방 밖의 색 (약간 밝은 회색)
+        scene.fog = new THREE.Fog(0xdddddd, 5, 15); // 거리감
+
+        // 2. 카메라 (눈높이 수정)
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 1.7, 5); // x:0, y:1.7m(성인 눈높이), z:5m 뒤
+
+        // 3. 렌더러
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap; // 부드러운 그림자
+        document.body.appendChild(renderer.domElement);
+
+        // 4. 조명 (따뜻한 실내 느낌)
+        const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.6);
+        hemiLight.position.set(0, 20, 0);
+        scene.add(hemiLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffdfba, 1.2); // 따뜻한 햇살
+        dirLight.position.set(5, 10, 7);
+        dirLight.castShadow = true;
+        dirLight.shadow.mapSize.width = 2048;
+        dirLight.shadow.mapSize.height = 2048;
+        scene.add(dirLight);
+
+        // 5. 방 만들기 (바닥, 벽)
+        function createRoom() {
+            // 바닥 (우드 톤)
+            const floorMat = new THREE.MeshStandardMaterial({ color: 0x8d6e63, roughness: 0.8 });
+            const floor = new THREE.Mesh(new THREE.PlaneGeometry(10, 10), floorMat);
+            floor.rotation.x = -Math.PI / 2;
+            floor.receiveShadow = true;
+            scene.add(floor);
+
+            // 뒷벽 (아이보리)
+            const wallMat = new THREE.MeshStandardMaterial({ color: 0xf5f5f5 });
+            const backWall = new THREE.Mesh(new THREE.PlaneGeometry(10, 5), wallMat);
+            backWall.position.set(0, 2.5, -3);
+            backWall.receiveShadow = true;
+            scene.add(backWall);
+
+            // 왼쪽 벽
+            const leftWall = new THREE.Mesh(new THREE.PlaneGeometry(10, 5), wallMat);
+            leftWall.rotation.y = Math.PI / 2;
+            leftWall.position.set(-5, 2.5, 0);
+            leftWall.receiveShadow = true;
+            scene.add(leftWall);
+        }
+        createRoom();
+
+        // 6. 가구 생성 함수 (도형 조합으로 디테일 향상)
+
+        // 소파 (팔걸이 + 쿠션)
+        function createDetailedSofa() {
+            const group = new THREE.Group();
+            const sofaColor = 0x5D4037; // 가죽 갈색
+
+            // 좌석
+            const seat = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.4, 0.8), new THREE.MeshStandardMaterial({ color: sofaColor }));
+            seat.position.y = 0.4;
+            seat.castShadow = true;
+            
+            // 등받이
+            const back = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.6, 0.2), new THREE.MeshStandardMaterial({ color: sofaColor }));
+            back.position.set(0, 0.9, -0.3);
+            back.castShadow = true;
+
+            // 팔걸이 L/R
+            const armGeo = new THREE.BoxGeometry(0.3, 0.6, 0.8);
+            const armL = new THREE.Mesh(armGeo, new THREE.MeshStandardMaterial({ color: sofaColor }));
+            armL.position.set(-1.1, 0.5, 0);
+            const armR = new THREE.Mesh(armGeo, new THREE.MeshStandardMaterial({ color: sofaColor }));
+            armR.position.set(1.1, 0.5, 0);
+            armL.castShadow = true; armR.castShadow = true;
+
+            group.add(seat, back, armL, armR);
+            return group;
+        }
+
+        // 벽걸이 에어컨 (송풍구 디테일)
+        function createDetailedWallAC() {
+            const group = new THREE.Group();
+            // 본체
+            const body = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.35, 0.25), new THREE.MeshStandardMaterial({ color: 0xffffff }));
+            body.castShadow = true;
+            // 송풍구 (검은 선)
+            const vent = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.05, 0.02), new THREE.MeshStandardMaterial({ color: 0x333333 }));
+            vent.position.set(0, -0.1, 0.12);
+
+            group.add(body, vent);
+            return group;
+        }
+
+        // 스탠드 에어컨 (무풍 스타일, 원형 타공 느낌)
+        function createDetailedStandAC() {
+            const group = new THREE.Group();
+            // 본체 (키 큰 박스)
+            const body = new THREE.Mesh(new THREE.BoxGeometry(0.45, 1.8, 0.4), new THREE.MeshStandardMaterial({ color: 0xeeeeee }));
+            body.position.y = 0.9;
+            body.castShadow = true;
+
+            // 원형 패널 2개
+            const circleGeo = new THREE.CylinderGeometry(0.15, 0.15, 0.02, 32);
+            const circleMat = new THREE.MeshStandardMaterial({ color: 0xcccccc });
+            const c1 = new THREE.Mesh(circleGeo, circleMat);
+            c1.rotation.x = Math.PI / 2;
+            c1.position.set(0, 1.4, 0.2);
+            const c2 = c1.clone();
+            c2.position.set(0, 0.8, 0.2);
+
+            group.add(body, c1, c2);
+            return group;
+        }
+
+        // TV (The Serif 스타일 - I자 프레임)
+        function createSerifTV() {
+            const group = new THREE.Group();
+            
+            // 프레임 (흰색 I자)
+            const frameGeo = new THREE.BoxGeometry(1.2, 0.7, 0.1);
+            const frame = new THREE.Mesh(frameGeo, new THREE.MeshStandardMaterial({ color: 0xffffff }));
+            frame.position.y = 0.8; // 다리 위 높이
+            frame.castShadow = true;
+
+            // 화면 (검정)
+            const screenGeo = new THREE.BoxGeometry(1.1, 0.65, 0.02);
+            const screen = new THREE.Mesh(screenGeo, new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.2 }));
+            screen.position.set(0, 0.8, 0.05);
+
+            // 다리 4개
+            const legGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.5);
+            const legMat = new THREE.MeshStandardMaterial({ color: 0xdddddd });
+            
+            const l1 = new THREE.Mesh(legGeo, legMat); l1.position.set(-0.5, 0.25, 0); l1.rotation.z = 0.2;
+            const l2 = new THREE.Mesh(legGeo, legMat); l2.position.set(0.5, 0.25, 0); l2.rotation.z = -0.2;
+            // 앞뒤 각도는 생략(단순화)
+
+            group.add(frame, screen, l1, l2);
+            return group;
+        }
+
+
+        // --- 배치 ---
+        const sofa = createDetailedSofa();
+        sofa.position.set(0, 0, -2); // 벽에 붙임
+        scene.add(sofa);
+
+        const wallAC = createDetailedWallAC();
+        wallAC.position.set(0, 2.0, -2.8); // 소파 위 벽
+        scene.add(wallAC);
+
+        const standAC = createDetailedStandAC();
+        standAC.position.set(2.5, 0, -2.5); // 우측 구석
+        standAC.rotation.y = -Math.PI / 6;
+        standAC.visible = false;
+        scene.add(standAC);
+
+        const tv = createSerifTV();
+        tv.position.set(-2, 0, -1); // 좌측 배치
+        tv.rotation.y = Math.PI / 4;
+        tv.visible = false;
+        scene.add(tv);
+
+
+        // --- 인터랙션 (이전과 동일) ---
+        window.addEventListener('keydown', (e) => {
+            if (e.key === '1') { // TV 추가
+                if (!tv.visible) {
+                    tv.visible = true;
+                    tv.scale.set(0,0,0);
+                    let s = 0;
+                    const ani = setInterval(() => {
+                        s += 0.1; tv.scale.set(s,s,s);
+                        if (s >= 1) clearInterval(ani);
+                    }, 16);
+                }
+            }
+            if (e.key === '2') { // 에어컨 교체
+                wallAC.visible = false;
+                standAC.visible = true;
+                standAC.scale.set(1, 0, 1);
+                let sy = 0;
+                const ani = setInterval(() => {
+                    sy += 0.05; standAC.scale.set(1, sy, 1);
+                    if (sy >= 1) clearInterval(ani);
+                }, 16);
+            }
+        });
+
+        // 렌더링
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.target.set(0, 1, 0); // 카메라가 보는 중심점도 높임
+        controls.enableDamping = true;
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        animate();
+        
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
