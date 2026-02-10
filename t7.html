@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>XR Mockup v7 (Mouse Look)</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; }
+        #ui-layer {
+            position: absolute; top: 20px; left: 20px;
+            color: rgba(255, 255, 255, 0.9);
+            font-family: 'Pretendard', sans-serif;
+            background: rgba(0, 0, 0, 0.6); padding: 15px; border-radius: 12px;
+            pointer-events: none; user-select: none; z-index: 10;
+        }
+        .key { color: #4facfe; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div id="ui-layer">
+        <div><span class="key">[1]</span> TV 추가</div>
+        <div><span class="key">[2]</span> 에어컨 교체</div>
+        <div><span class="key">[3]</span> 에어컨 이동</div>
+        <div style="margin-top:10px; font-size:0.8em; color:#aaa;">
+            * 마우스 움직임: 시선 이동 / 휠: 줌
+        </div>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+        // OrbitControls 제거함 (마우스 무브 방식으로 대체)
+
+        // ==========================================
+        // ★ 모델 설정 ★
+        // ==========================================
+        const CONFIG = {
+            sofa: { path: './sofa.glb', scale: 1.5, pos: [0, 0, -2], rot: [0, 0, 0] },
+            wallAC: { path: './wall_ac.glb', scale: 1.0, pos: [0, 2.2, -2.8], rot: [0, 0, 0] },
+            tv: { path: './moving_tv.glb', scale: 1.2, pos: [-1.8, 0, -1.5], rot: [0, Math.PI/4, 0] },
+            standAC: { path: './stand_ac.glb', scale: 1.2, pos: [2.5, 0, -2.5], rot: [0, -Math.PI/6, 0] }
+        };
+
+        // 1. 씬 & 카메라
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x000000); 
+
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
+        // 초기 위치 설정
+        camera.position.set(0, 1.6, 2.5);
+        camera.rotation.order = 'YXZ'; // 회전 순서 중요 (Y축 먼저 돌리고 X축)
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.outputColorSpace = THREE.SRGBColorSpace;
+        document.body.appendChild(renderer.domElement);
+
+        // 조명 & 방 만들기 (기존 동일)
+        const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.8); scene.add(hemiLight);
+        const dirLight = new THREE.DirectionalLight(0xffdfba, 1.5); dirLight.position.set(5, 10, 7); dirLight.castShadow = true; scene.add(dirLight);
+
+        function createRoom() {
+            const floor = new THREE.Mesh(new THREE.PlaneGeometry(10, 10), new THREE.MeshStandardMaterial({ color: 0x8d6e63, roughness: 0.8 }));
+            floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
+            const wallMat = new THREE.MeshStandardMaterial({ color: 0xf5f5f5 });
+            const backWall = new THREE.Mesh(new THREE.PlaneGeometry(10, 5), wallMat); backWall.position.set(0, 2.5, -3); backWall.receiveShadow = true; scene.add(backWall);
+            const leftWall = new THREE.Mesh(new THREE.PlaneGeometry(10, 5), wallMat); leftWall.rotation.y = Math.PI/2; leftWall.position.set(-5, 2.5, 0); scene.add(leftWall);
+            const rightWall = new THREE.Mesh(new THREE.PlaneGeometry(10, 5), wallMat); rightWall.rotation.y = -Math.PI/2; rightWall.position.set(5, 2.5, 0); scene.add(rightWall);
+        }
+        createRoom();
+
+        // 모델 로더
+        const loader = new GLTFLoader();
+        const models = {};
+        function loadModel(key, isVisible) {
+            const conf = CONFIG[key];
+            loader.load(conf.path, (gltf) => {
+                const mesh = gltf.scene;
+                mesh.scale.set(conf.scale, conf.scale, conf.scale);
+                mesh.position.set(...conf.pos);
+                mesh.rotation.set(...conf.rot);
+                mesh.traverse(n => { if(n.isMesh) n.castShadow = true; });
+                mesh.visible = isVisible;
+                scene.add(mesh);
+                models[key] = mesh;
+            });
+        }
+        loadModel('sofa', true); loadModel('wallAC', true); loadModel('tv', false); loadModel('standAC', false);
+
+
+        // ==========================================
+        // ★ NEW: 마우스 무브 시점 변경 로직 ★
+        // ==========================================
+        let mouseX = 0;
+        let mouseY = 0;
+        
+        // 마우스 움직임 감지
+        document.addEventListener('mousemove', (event) => {
+            // 화면 중앙을 (0,0)으로, 끝을 -1 ~ 1 로 변환
+            mouseX = (event.clientX / window.innerWidth) * 2 - 1;
+            mouseY = (event.clientY / window.innerHeight) * 2 - 1;
+        });
+
+        // 휠 줌 (Zoom) 감지
+        document.addEventListener('wheel', (event) => {
+            // 휠을 아래로(양수) -> 뒤로 물러남, 위로(음수) -> 앞으로 전진
+            camera.position.z += event.deltaY * 0.005;
+            
+            // 줌 범위 제한 (너무 가까이/멀리 못가게)
+            if(camera.position.z < 1.5) camera.position.z = 1.5;
+            if(camera.position.z > 4.5) camera.position.z = 4.5;
+        });
+
+
+        // 인터랙션 (기존 동일)
+        window.addEventListener('keydown', (e) => {
+            if (e.key === '1' && models.tv && !models.tv.visible) {
+                models.tv.visible = true; models.tv.scale.set(0,0,0); let s=0; 
+                const ani = setInterval(()=>{ s+=0.1; models.tv.scale.set(s*CONFIG.tv.scale, s*CONFIG.tv.scale, s*CONFIG.tv.scale); if(s>=1) clearInterval(ani); }, 16);
+            }
+            if (e.key === '2' && models.wallAC && models.standAC) {
+                models.wallAC.visible = false; models.standAC.visible = true; models.standAC.scale.set(CONFIG.standAC.scale,0,CONFIG.standAC.scale);
+                let s=0; const ani=setInterval(()=>{ s+=0.1; models.standAC.scale.set(CONFIG.standAC.scale, s*CONFIG.standAC.scale, CONFIG.standAC.scale); if(s>=1) clearInterval(ani); }, 16);
+            }
+            if (e.key === '3' && models.standAC && models.standAC.visible) {
+                const start = models.standAC.position.clone(); const target = new THREE.Vector3(4.0, 0, -4.0); let a=0;
+                const ani=setInterval(()=>{ a+=0.02; if(a>=1){a=1; clearInterval(ani);} models.standAC.position.lerpVectors(start, target, a); }, 16);
+            }
+        });
+
+
+        // 렌더링 루프
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // ★ 마우스 위치에 따라 카메라 회전 (부드럽게)
+            // 좌우 각도 제한: -45도 ~ 45도 (PI/4)
+            // 상하 각도 제한: -10도 ~ 10도 (PI/18) -> 너무 많이 끄덕거리면 어지러움
+            
+            const targetRotY = -mouseX * (Math.PI / 4); 
+            const targetRotX = -mouseY * (Math.PI / 18);
+
+            // 부드러운 감속 효과 (Damping)
+            // 현재 각도에서 목표 각도로 5%씩 점진적 이동
+            camera.rotation.y += (targetRotY - camera.rotation.y) * 0.05;
+            camera.rotation.x += (targetRotX - camera.rotation.x) * 0.05;
+
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
