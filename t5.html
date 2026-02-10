@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>XR Mockup Final</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; }
+        #ui-layer {
+            position: absolute; top: 20px; left: 20px;
+            color: rgba(255, 255, 255, 0.8);
+            font-family: sans-serif;
+            pointer-events: none; user-select: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="ui-layer">
+        <div>[1] TV 추가 (무빙스타일)</div>
+        <div>[2] 에어컨 교체 (벽걸이 -> 스탠드)</div>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+        // ==========================================
+        // ★ 여기만 수정하면 됩니다 (모델 설정) ★
+        // ==========================================
+        const CONFIG = {
+            sofa: { 
+                path: './sofa.glb', 
+                scale: 1.5, pos: [0, 0, -2], rot: [0, 0, 0] 
+            },
+            wallAC: { 
+                path: './wall_ac.glb', 
+                scale: 1.0, pos: [0, 2.2, -2.9], rot: [0, 0, 0] 
+            },
+            tv: { 
+                path: './moving_tv.glb', 
+                scale: 1.2, pos: [-1.5, 0, -1.5], rot: [0, Math.PI/4, 0] 
+            },
+            standAC: { 
+                path: './stand_ac.glb', 
+                scale: 1.2, pos: [2.5, 0, -2.5], rot: [0, -Math.PI/6, 0] 
+            }
+        };
+
+        // 1. 씬 설정
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x111111); // 아주 어두운 회색 (완전 블랙보다 깊이감 있음)
+
+        // 2. 카메라 (몰입감 시점)
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
+        camera.position.set(0, 1.6, 2.5);
+
+        // 3. 렌더러
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.outputColorSpace = THREE.SRGBColorSpace; // 모델 색상 보정
+        document.body.appendChild(renderer.domElement);
+
+        // 4. 조명
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+        scene.add(ambientLight);
+        
+        const spotLight = new THREE.SpotLight(0xffffff, 1.5);
+        spotLight.position.set(5, 8, 5);
+        spotLight.castShadow = true;
+        scene.add(spotLight);
+
+        // 5. 바닥 및 벽 (공간감)
+        const floor = new THREE.Mesh(new THREE.PlaneGeometry(10, 10), new THREE.MeshStandardMaterial({ color: 0x555555 }));
+        floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
+        
+        const wallMat = new THREE.MeshStandardMaterial({ color: 0x333333 }); // 어두운 벽
+        const backWall = new THREE.Mesh(new THREE.PlaneGeometry(10, 5), wallMat);
+        backWall.position.set(0, 2.5, -3); backWall.receiveShadow = true; scene.add(backWall);
+
+        // 6. 모델 로드 로직
+        const loader = new GLTFLoader();
+        const models = {}; // 로드된 모델 저장소
+
+        function loadModel(key, isVisible = true) {
+            const conf = CONFIG[key];
+            loader.load(conf.path, (gltf) => {
+                const mesh = gltf.scene;
+                
+                // 설정값 적용
+                mesh.scale.set(conf.scale, conf.scale, conf.scale);
+                mesh.position.set(...conf.pos);
+                mesh.rotation.set(...conf.rot);
+                
+                // 그림자 및 보이기 설정
+                mesh.traverse(n => { if(n.isMesh) n.castShadow = true; });
+                mesh.visible = isVisible;
+                
+                scene.add(mesh);
+                models[key] = mesh; // 저장
+            }, 
+            undefined, 
+            (err) => console.error(`${key} 로드 실패:`, err));
+        }
+
+        // 실행: 모델 불러오기
+        loadModel('sofa', true);     // 소파: 보임
+        loadModel('wallAC', true);   // 벽걸이: 보임
+        loadModel('tv', false);      // TV: 숨김
+        loadModel('standAC', false); // 스탠드: 숨김
+
+
+        // 7. 인터랙션 (키보드 이벤트)
+        window.addEventListener('keydown', (e) => {
+            // [1] TV 추가
+            if (e.key === '1' && models.tv) {
+                if (!models.tv.visible) {
+                    models.tv.visible = true;
+                    // 팝업 애니메이션
+                    models.tv.scale.set(0,0,0);
+                    let s = 0;
+                    const targetScale = CONFIG.tv.scale;
+                    const ani = setInterval(() => {
+                        s += 0.1;
+                        models.tv.scale.set(s*targetScale, s*targetScale, s*targetScale);
+                        if(s >= 1) clearInterval(ani);
+                    }, 16);
+                }
+            }
+
+            // [2] 에어컨 교체
+            if (e.key === '2' && models.wallAC && models.standAC) {
+                models.wallAC.visible = false;  // 벽걸이 끄기
+                models.standAC.visible = true;  // 스탠드 켜기
+                
+                // 팝업 애니메이션
+                models.standAC.scale.set(CONFIG.standAC.scale, 0, CONFIG.standAC.scale);
+                let sy = 0;
+                const targetScale = CONFIG.standAC.scale;
+                const ani = setInterval(() => {
+                    sy += 0.1;
+                    models.standAC.scale.set(targetScale, sy*targetScale, targetScale);
+                    if(sy >= 1) clearInterval(ani);
+                }, 16);
+            }
+        });
+
+        // 8. 렌더링 & 컨트롤
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.minDistance = 1.5; controls.maxDistance = 4;
+        controls.minAzimuthAngle = -Math.PI / 4; controls.maxAzimuthAngle = Math.PI / 4; // 좌우 제한
+        controls.target.set(0, 1.2, 0);
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
