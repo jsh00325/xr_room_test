@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>Immersive XR Room with Models</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; }
+        #ui-layer {
+            position: absolute; top: 20px; left: 20px;
+            color: rgba(255, 255, 255, 0.9);
+            font-family: 'Pretendard', sans-serif;
+            background: rgba(0, 0, 0, 0.6); padding: 15px; border-radius: 12px;
+            pointer-events: none; user-select: none; z-index: 10;
+        }
+        .key { color: #4facfe; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div id="ui-layer">
+        <div><span class="key">[1]</span> TV 추가 (무빙스타일)</div>
+        <div><span class="key">[2]</span> 에어컨 교체 (스탠드형)</div>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+
+        // ==========================================
+        // ★ 모델 파일 설정 (파일명과 위치/크기 조절) ★
+        // ==========================================
+        const CONFIG = {
+            sofa: { 
+                path: './sofa.glb', 
+                scale: 1.5, pos: [0, 0, -2], rot: [0, 0, 0] 
+            },
+            wallAC: { 
+                path: './wall_ac.glb', 
+                scale: 1.0, pos: [0, 2.2, -2.8], rot: [0, 0, 0] 
+            },
+            tv: { 
+                path: './moving_tv.glb', 
+                scale: 1.2, pos: [-1.8, 0, -1.5], rot: [0, Math.PI/4, 0] 
+            },
+            standAC: { 
+                path: './stand_ac.glb', 
+                scale: 1.2, pos: [2.5, 0, -2.5], rot: [0, -Math.PI/6, 0] 
+            }
+        };
+
+        // 1. 씬 & 환경 설정 (v4.0 복구)
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x000000); // 암막 배경
+
+        // 2. 카메라 (몰입감 높은 시점)
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 100);
+        camera.position.set(0, 1.6, 2.5); // 방 안으로 깊숙이 들어온 시점
+
+        // 3. 렌더러
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap; // 부드러운 그림자
+        renderer.outputColorSpace = THREE.SRGBColorSpace; // 모델 색감 보정
+        document.body.appendChild(renderer.domElement);
+
+        // 4. 조명 (따뜻한 분위기 복구)
+        const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.8);
+        scene.add(hemiLight);
+
+        const dirLight = new THREE.DirectionalLight(0xffdfba, 1.5); // 따뜻한 햇살
+        dirLight.position.set(5, 10, 7);
+        dirLight.castShadow = true;
+        scene.add(dirLight);
+
+        // 5. 방 만들기 (우드 바닥 + 아이보리 벽 복구)
+        function createRoom() {
+            // 바닥
+            const floorMat = new THREE.MeshStandardMaterial({ color: 0x8d6e63, roughness: 0.8 });
+            const floor = new THREE.Mesh(new THREE.PlaneGeometry(10, 10), floorMat);
+            floor.rotation.x = -Math.PI / 2; floor.receiveShadow = true; scene.add(floor);
+
+            // 벽 (ㄷ자 형태)
+            const wallMat = new THREE.MeshStandardMaterial({ color: 0xf5f5f5 }); // 아이보리
+            
+            const backWall = new THREE.Mesh(new THREE.PlaneGeometry(10, 5), wallMat);
+            backWall.position.set(0, 2.5, -3); backWall.receiveShadow = true; scene.add(backWall);
+
+            const leftWall = new THREE.Mesh(new THREE.PlaneGeometry(10, 5), wallMat);
+            leftWall.rotation.y = Math.PI/2; leftWall.position.set(-5, 2.5, 0); leftWall.receiveShadow = true; scene.add(leftWall);
+            
+            const rightWall = new THREE.Mesh(new THREE.PlaneGeometry(10, 5), wallMat);
+            rightWall.rotation.y = -Math.PI/2; rightWall.position.set(5, 2.5, 0); rightWall.receiveShadow = true; scene.add(rightWall);
+        }
+        createRoom();
+
+        // 6. 모델 로더 (여기에 실제 파일 로딩)
+        const loader = new GLTFLoader();
+        const models = {};
+
+        function loadModel(key, isVisible) {
+            const conf = CONFIG[key];
+            loader.load(conf.path, (gltf) => {
+                const mesh = gltf.scene;
+                
+                mesh.scale.set(conf.scale, conf.scale, conf.scale);
+                mesh.position.set(...conf.pos);
+                mesh.rotation.set(...conf.rot);
+                
+                mesh.traverse(n => { if(n.isMesh) n.castShadow = true; });
+                mesh.visible = isVisible;
+                
+                scene.add(mesh);
+                models[key] = mesh;
+            }, undefined, (err) => {
+                console.warn(`${key} 모델을 찾을 수 없습니다. (파일 경로 확인 필요)`);
+            });
+        }
+
+        // 실행: 모델 로드
+        loadModel('sofa', true);     // 소파
+        loadModel('wallAC', true);   // 벽걸이 에어컨
+        loadModel('tv', false);      // TV (처음엔 숨김)
+        loadModel('standAC', false); // 스탠드 에어컨 (처음엔 숨김)
+
+
+        // 7. 인터랙션
+        window.addEventListener('keydown', (e) => {
+            // [1] TV 추가
+            if (e.key === '1' && models.tv) {
+                if (!models.tv.visible) {
+                    models.tv.visible = true;
+                    // 팝업 효과
+                    models.tv.scale.set(0,0,0);
+                    let s = 0;
+                    const tScale = CONFIG.tv.scale;
+                    const ani = setInterval(() => {
+                        s += 0.1; models.tv.scale.set(s*tScale, s*tScale, s*tScale);
+                        if(s >= 1) clearInterval(ani);
+                    }, 16);
+                }
+            }
+            // [2] 에어컨 교체
+            if (e.key === '2' && models.wallAC && models.standAC) {
+                models.wallAC.visible = false;
+                models.standAC.visible = true;
+                // 팝업 효과
+                models.standAC.scale.set(CONFIG.standAC.scale, 0, CONFIG.standAC.scale);
+                let sy = 0;
+                const tScale = CONFIG.standAC.scale;
+                const ani = setInterval(() => {
+                    sy += 0.1; models.standAC.scale.set(tScale, sy*tScale, tScale);
+                    if(sy >= 1) clearInterval(ani);
+                }, 16);
+            }
+        });
+
+        // 8. 컨트롤 (시야각 제한 유지)
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.minDistance = 1.5; controls.maxDistance = 4;
+        
+        // ★ 시야 제한 (방 밖을 못 보게) ★
+        controls.minAzimuthAngle = -Math.PI / 4; 
+        controls.maxAzimuthAngle = Math.PI / 4;
+        controls.minPolarAngle = Math.PI / 3;
+        controls.maxPolarAngle = Math.PI / 2;
+        
+        controls.target.set(0, 1.2, 0);
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
